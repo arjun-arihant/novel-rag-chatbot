@@ -29,7 +29,7 @@ A **private, offline AI chatbot** that can answer questions about any novel usin
 ## 📂 Project Structure
 
 ```
-├── novel.txt               # Your input novel (in plain text format)
+├── novel.txt              # Your input novel (in plain text format)
 ├── main.py                # Main script to run the chatbot
 ├── chroma_db/             # Persistent vector database (auto-created)
 ├── chroma_db_backup/      # Auto-created backup of the DB
