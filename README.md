@@ -64,41 +64,19 @@ ollama pull mistral:7b
 Place your novel text file as `novel.txt`. Chapters must follow this format:
 
 ```
-[Chapter 3: A Grand Adventure]
+Chapter 3: A Grand Adventure
 Once upon a time...
 ```
 
-Each chapter **must be wrapped in square brackets** and follow this naming style.
+Each chapter **must follow this naming style.**
 
 ### 4. Run the Chatbot
 
 ```bash
-python main.py
+python chatbot.py
 ```
 
 You'll be prompted to ask questions. Type `exit` to quit.
-
----
-
-## 🌐 Optional: Launch Web UI
-
-Install Gradio:
-
-```bash
-pip install gradio
-```
-
-And modify the script or run this in a separate file:
-
-```python
-import gradio as gr
-
-def ask_bot(question):
-    result = qa_chain.invoke({"question": question})
-    return result["result"]
-
-gr.Interface(fn=ask_bot, inputs="text", outputs="text", title="📚 Novel Chatbot").launch()
-```
 
 ---
 
