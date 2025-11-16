@@ -13,3 +13,23 @@ Chapters: 138, 284, 409, 623
 Q: why did everyone hate the xuantian cult/sect
 A:  The Xuantian Sect was hated because they once ruled the world with an iron fist, committing numerous atrocities and usurping the heavens' mandate. They were seen as evil and oppressive, wantonly oppressing and humiliating other cultivators to the point where the people of the world could no longer endure. The Ten Great Immortal Sects eventually united to overthrow the Xuantian Sect due to their tyrannical rule.
 Chapters: 409, 538, 606, 623
+
+[2025-06-29T21:05:49.686664]
+Q: who is li fan
+A:  Li Fan is a character in this context. He was a scholar who lived multiple lives in the Grand Xuan Kingdom, aiming to capture immortals in his next life. In his third life, he became an influential official and Imperial Advisor, but due to certain events, he decided to return to an earlier point in time using a device called [Truth].
+Chapters: 1, 3, 13
+
+[2025-06-29T22:49:22.626693]
+Q: who is Li Fan
+A:  Li Fan is a character from the given context. He is a scholar who strives to change the world and capture immortals in his next life. Over the course of multiple lives, he accumulates knowledge, reputation, and power to become an Imperial Advisor in the Grand Xuan Kingdom. However, he was unable to profit from the death of two immortal cultivators as he had hoped, causing him to decide to return to a previous point in time using a device called [Truth].
+Chapters: 1, 3, 13
+
+[2025-06-29T23:00:08.257601]
+Q: what is his occupation
+A:  Li Fan's occupation in this context appears to be that of an Imperial Advisor, a high-ranking official within the Grand Xuan Kingdom. He has also shown skills in governance, military strategy, and weapon design. However, it's not explicitly stated that he holds these as his primary occupations; rather, they seem to be part of his role as an Imperial Advisor. In addition, he was previously a scholar and a county official.
+Chapters: 1, 3, 5
+
+[2025-11-16T14:08:04.328353]
+Q: who is the main character of the novel
+A:  The main character of the novel seems to be Li Fan, as he is the one whose consciousness and thoughts are being narrated throughout the provided context.
+Chapters: 1, 4, 5, 8, 10

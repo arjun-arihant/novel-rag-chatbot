@@ -1,5 +1,22 @@
-langchain
-langchain-community
-chromadb
-tqdm
-gradio
+# Core dependencies
+langchain>=0.1.0
+langchain-community>=0.0.10
+chromadb>=0.4.22
+tqdm>=4.66.0
+gradio>=4.0.0
+
+# LLM and Embeddings (via Ollama)
+# No direct dependencies - Ollama must be installed separately
+
+# Text processing and NLP
+nltk>=3.8.1
+
+# Data processing
+numpy>=1.24.0
+pyyaml>=6.0
+
+# BM25 for hybrid search
+rank-bm25>=0.2.2
+
+# Optional but recommended
+python-dotenv>=1.0.0  # For environment variables
