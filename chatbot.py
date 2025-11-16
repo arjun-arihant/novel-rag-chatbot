@@ -26,10 +26,9 @@ from langchain_community.document_loaders import TextLoader
 from langchain_community.embeddings import OllamaEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_community.llms import Ollama
-from langchain.chains import RetrievalQA
 from langchain_core.prompts import PromptTemplate
-from langchain.memory import ConversationBufferMemory
-from langchain.schema import Document
+from langchain_community.chat_message_histories import ChatMessageHistory
+from langchain_core.documents import Document
 
 # Gradio for UI
 import gradio as gr
@@ -178,13 +177,9 @@ class NovelRAGChatbot:
                 analytics_path=self.paths['analytics']
             )
 
-        # Memory for conversation
+        # Memory for conversation (LangChain 1.0+ approach)
         if self.memory_config['enabled']:
-            self.memory = ConversationBufferMemory(
-                memory_key="chat_history",
-                return_messages=True,
-                output_key="result"
-            )
+            self.memory = ChatMessageHistory()
 
     def _load_and_process_novel(self):
         """Load novel and process chapters."""
@@ -340,8 +335,8 @@ class NovelRAGChatbot:
             batch = chunks[i:i+batch_size]
             self.vectorstore.add_documents(batch)
 
-        # Persist
-        self.vectorstore.persist()
+        # Note: persist() is no longer needed in newer Chroma versions (auto-saves)
+        # Data is automatically persisted to the persist_directory
 
         duration = time.time() - start_time
         print(f"✅ Vector DB updated and saved in {duration:.2f}s.")
@@ -371,10 +366,10 @@ class NovelRAGChatbot:
 
     def _setup_qa_chain(self):
         """Setup the QA chain with enhanced prompt."""
-        llm = Ollama(model=self.models['llm'])
+        self.llm = Ollama(model=self.models['llm'])
 
         # Enhanced prompt template
-        prompt_template = """You are an expert literary analyst discussing a novel. Use the context provided to give detailed, insightful answers.
+        self.prompt_template = """You are an expert literary analyst discussing a novel. Use the context provided to give detailed, insightful answers.
 
 If information spans multiple chapters, explain the progression or connections.
 Always cite specific chapter numbers when referencing events.
@@ -387,24 +382,33 @@ Question: {question}
 
 Detailed Answer:"""
 
-        PROMPT = PromptTemplate(
-            template=prompt_template,
+        self.PROMPT = PromptTemplate(
+            template=self.prompt_template,
             input_variables=["context", "question"]
         )
 
-        # Create retriever from hybrid retriever
-        retriever = self.vectorstore.as_retriever(
-            search_kwargs={"k": self.retrieval_config['top_k']}
-        )
+        # Note: We don't use RetrievalQA.from_chain_type here because it doesn't support
+        # our custom hybrid retriever properly. Instead, we'll manually retrieve and generate
+        # in the ask_question method.
 
-        # Create QA chain
-        self.qa_chain = RetrievalQA.from_chain_type(
-            llm=llm,
-            chain_type="stuff",
-            retriever=retriever,
-            return_source_documents=True,
-            chain_type_kwargs={"prompt": PROMPT}
-        )
+    def get_conversation_context(self) -> str:
+        """Get recent conversation context as a string."""
+        if not self.memory or not self.memory.messages:
+            return ""
+        
+        # Get last few messages (configurable)
+        max_history = self.memory_config.get('max_history', 5)
+        recent_messages = self.memory.messages[-max_history*2:]  # *2 for user+ai pairs
+        
+        context_parts = []
+        for msg in recent_messages:
+            if hasattr(msg, 'type'):
+                if msg.type == 'human':
+                    context_parts.append(f"User: {msg.content}")
+                elif msg.type == 'ai':
+                    context_parts.append(f"Assistant: {msg.content}")
+        
+        return "\n".join(context_parts)
 
     def ask_question(self, query: str, search_mode: str = "default") -> Dict:
         """
@@ -429,6 +433,10 @@ Detailed Answer:"""
                 cached_result = self.semantic_cache.get(query)
                 if cached_result:
                     print("💾 Using cached result")
+                    # Still add to memory even if cached
+                    if self.memory:
+                        self.memory.add_user_message(query)
+                        self.memory.add_ai_message(cached_result["answer"])
                     return cached_result
 
             # Enhance query if enabled
@@ -468,18 +476,31 @@ Detailed Answer:"""
 
             retrieval_time = time.time() - retrieval_start
 
-            # Get answer from LLM
-            llm_start = time.time()
-            result = self.qa_chain.invoke({"query": enhanced_query})
-            answer = result["result"]
-            llm_time = time.time() - llm_start
-
-            # Extract chapter information
+            # Build context from retrieved documents
+            context_parts = []
             chapters_used = set()
-            for doc in result["source_documents"]:
+            for i, doc in enumerate(docs[:self.retrieval_config['top_k']], 1):
                 chapter_number = doc.metadata.get("chapter_number")
+                chapter_title = doc.metadata.get("chapter_title", "Unknown")
+
                 if chapter_number:
                     chapters_used.add(int(chapter_number))
+
+                context_parts.append(f"[Source {i} - {chapter_title}]\n{doc.page_content}\n")
+
+            context = "\n".join(context_parts)
+
+            # Add conversation history to context if enabled
+            if self.memory and self.memory_config.get('include_history_in_prompt', False):
+                conv_context = self.get_conversation_context()
+                if conv_context:
+                    context = f"Previous conversation:\n{conv_context}\n\n{context}"
+
+            # Get answer from LLM using the prompt template
+            llm_start = time.time()
+            formatted_prompt = self.PROMPT.format(context=context, question=enhanced_query)
+            answer = self.llm.invoke(formatted_prompt)
+            llm_time = time.time() - llm_start
 
             chapter_list = sorted(chapters_used)
             chapter_str = ", ".join(map(str, chapter_list))
@@ -494,6 +515,11 @@ Detailed Answer:"""
                 "llm_time": llm_time,
                 "total_time": time.time() - start_time
             }
+
+            # Add to conversation memory
+            if self.memory:
+                self.memory.add_user_message(query)
+                self.memory.add_ai_message(answer)
 
             # Add to semantic cache
             if self.semantic_cache:
@@ -539,6 +565,12 @@ Detailed Answer:"""
                 self.analytics.log_error("query_processing", str(e), {"query": query})
 
             return {"answer": error_msg, "chapters": [], "total_time": time.time() - start_time}
+
+    def clear_conversation_memory(self):
+        """Clear the conversation memory."""
+        if self.memory:
+            self.memory.clear()
+            print("🧹 Conversation memory cleared.")
 
     def _log_to_file(self, query: str, answer: str, chapters: str):
         """Log interaction to file."""
@@ -598,6 +630,11 @@ Detailed Answer:"""
 
             return output
 
+        def clear_memory():
+            """Clear conversation memory."""
+            self.clear_conversation_memory()
+            return "✅ Conversation memory cleared!"
+
         # Create interface
         with gr.Blocks(theme=gr.themes.Soft(), title="Novel RAG Chatbot") as interface:
             gr.Markdown("# 📚 Enhanced Novel RAG Chatbot")
@@ -618,7 +655,9 @@ Detailed Answer:"""
                         label="Search Mode"
                     )
 
-            submit_btn = gr.Button("Ask", variant="primary")
+            with gr.Row():
+                submit_btn = gr.Button("Ask", variant="primary")
+                clear_btn = gr.Button("Clear Memory", variant="secondary")
 
             output = gr.Textbox(
                 lines=15,
@@ -626,10 +665,25 @@ Detailed Answer:"""
                 show_copy_button=True
             )
 
+            status_output = gr.Textbox(
+                lines=1,
+                label="Status",
+                visible=False
+            )
+
             submit_btn.click(
                 fn=gradio_ask,
                 inputs=[query_input, mode_dropdown],
                 outputs=output
+            )
+
+            clear_btn.click(
+                fn=clear_memory,
+                inputs=[],
+                outputs=status_output
+            ).then(
+                lambda: gr.update(visible=True),
+                outputs=status_output
             )
 
             # Add examples if configured
@@ -652,7 +706,7 @@ Detailed Answer:"""
                     )
 
         interface.launch(
-            server_name="0.0.0.0",
+            server_name="127.0.0.1",
             server_port=7860,
             share=False
         )
@@ -707,6 +761,7 @@ def main():
                     print("Goodbye!")
                     break
                 elif query.lower() == 'clear':
+                    chatbot.clear_conversation_memory()
                     if chatbot.query_enhancer:
                         chatbot.query_enhancer.clear_context()
                     print("Conversation cleared.")

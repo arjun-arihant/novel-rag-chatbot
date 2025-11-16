@@ -1,0 +1,20 @@
+{
+  "queries": [],
+  "performance": [
+    {
+      "timestamp": "2025-11-16T22:14:54.199945",
+      "operation": "novel_loading",
+      "duration": 0.0009992122650146484,
+      "success": true
+    },
+    {
+      "timestamp": "2025-11-16T22:17:14.739618",
+      "operation": "novel_loading",
+      "duration": 0.0010001659393310547,
+      "success": true
+    }
+  ],
+  "errors": [],
+  "retrieval_quality": [],
+  "session_start": "2025-11-16T22:17:14.732925"
+}

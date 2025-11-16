@@ -2,8 +2,15 @@
 Hybrid retriever combining BM25 keyword search and semantic vector search
 """
 from typing import List, Dict, Any
-from langchain.schema import Document
-from langchain.retrievers import EnsembleRetriever
+from langchain_core.documents import Document
+try:
+    from langchain.retrievers.ensemble import EnsembleRetriever
+except ImportError:
+    try:
+        from langchain_community.retrievers import EnsembleRetriever
+    except ImportError:
+        # If neither works, we'll handle it gracefully
+        EnsembleRetriever = None
 from langchain_community.retrievers import BM25Retriever
 
 
@@ -43,13 +50,15 @@ class HybridRetriever:
             self.bm25_retriever = None
 
         # Create ensemble retriever if BM25 available
-        if self.bm25_retriever:
+        if self.bm25_retriever and EnsembleRetriever is not None:
             self.ensemble_retriever = EnsembleRetriever(
                 retrievers=[self.bm25_retriever, self.semantic_retriever],
                 weights=[bm25_weight, semantic_weight]
             )
         else:
             self.ensemble_retriever = None
+            if self.bm25_retriever and EnsembleRetriever is None:
+                print("Warning: EnsembleRetriever not available, falling back to semantic search only")
 
     def retrieve(self, query: str, search_type: str = "hybrid",
                 use_mmr: bool = False, mmr_lambda: float = 0.7,

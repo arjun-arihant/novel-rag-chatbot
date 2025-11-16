@@ -41,7 +41,7 @@ class ClearButton(Button):
         size: Literal["sm", "md", "lg"] = "lg",
         icon: str | Path | None = None,
         link: str | None = None,
-        visible: bool = True,
+        visible: bool | Literal["hidden"] = True,
         interactive: bool = True,
         elem_id: str | None = None,
         elem_classes: list[str] | str | None = None,
