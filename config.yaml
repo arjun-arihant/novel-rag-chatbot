@@ -1,120 +1,58 @@
-# Novel RAG Chatbot Configuration
+# Novel RAG Chatbot v2 Configuration
 
-# File paths
+# Embedding model (local Ollama)
+embedding:
+  model: "qwen3-embedding:0.6b"
+  base_url: "http://localhost:11434"
+  dimension: 1024
+
+# Query rewriter - ultra-strict, deterministic
+query_rewriter:
+  model: "llama3.1:8b"
+  base_url: "http://localhost:11434"
+  temperature: 0.0
+  max_tokens: 128
+
+# Reranker - JSON output, constrained scoring
+reranker:
+  model: "llama3.1:8b"
+  base_url: "http://localhost:11434"
+  temperature: 0.0
+  max_tokens: 64
+
+# Answer generator - grounded, concise
+generator:
+  model: "llama3.1:8b"
+  base_url: "http://localhost:11434"
+  temperature: 0.25
+  max_tokens: 512
+
+# Chunking - token-based with overlap
+chunking:
+  target_tokens: 500     # ~2000 chars
+  min_tokens: 400
+  max_tokens: 800
+  overlap_tokens: 100
+  malformed_threshold: 0.1  # Fallback to paragraph if >10% malformed sentences
+
+# Retrieval parameters
+retrieval:
+  dense_top_k: 20
+  sparse_top_k: 20
+  fusion_top_k: 10
+  final_top_k: 5
+  rrf_k: 60              # RRF constant
+  min_rerank_score: 3.0  # Refuse if top score below this
+
+# Paths
 paths:
   novel: "novel.txt"
-  persist_directory: "chroma_db"
-  chapter_index: "chapter_index.json"
-  db_backup: "chroma_db_backup"
-  chatlog: "chatlog.txt"
-  entity_cache: "entity_cache.json"
-  summary_cache: "summary_cache.json"
-  analytics: "analytics.json"
-  semantic_cache: "semantic_cache.json"
-
-# Model configuration
-models:
-  embedding: "nomic-embed-text"
-  llm: "mistral:7b"
-  query_rewriter: "mistral:7b"
-
-# Chunking parameters
-chunking:
-  size: 1000
-  overlap: 200
-  respect_sentences: true
-  min_chunk_size: 100
-
-# Retrieval configuration
-retrieval:
-  top_k: 5
-  similarity_threshold: 0.7
-  use_mmr: true
-  mmr_lambda: 0.7
-  search_type: "hybrid"
-  bm25_weight: 0.3
-  semantic_weight: 0.7
-
-# Search modes
-search_modes:
-  broad:
-    top_k: 10
-    similarity_threshold: 0.6
-  precise:
-    top_k: 3
-    similarity_threshold: 0.8
-  character_focused:
-    top_k: 8
-    similarity_threshold: 0.7
-  timeline:
-    top_k: 7
-    similarity_threshold: 0.65
-
-# Memory configuration
-memory:
-  enabled: true
-  max_messages: 10
-  summary_threshold: 8
-
-# Query enhancement
-query_enhancement:
-  rewrite_enabled: true
-  expand_enabled: true
-  max_rewrites: 3
-  pronoun_resolution: true
-
-# Summarization
-summarization:
-  enabled: true
-  cache_summaries: true
-  summary_length: "medium"
-  regenerate_on_update: true
-
-# Entity extraction
-entity_extraction:
-  enabled: true
-  extract_characters: true
-  extract_locations: true
-  extract_relationships: true
-  min_mention_count: 2
-
-# Semantic cache
-semantic_cache:
-  enabled: true
-  similarity_threshold: 0.95
-  max_cache_size: 100
-  ttl_hours: 168
-
-# Performance
-performance:
-  embedding_batch_size: 5
-  max_workers: 4
-  timeout_seconds: 120
-  enable_analytics: true
-  log_queries: true
-  log_retrieval_quality: true
+  chroma_db: "chroma_db_v2"
+  bm25_index: "bm25_index.pkl"
+  chapter_index: "chapter_index_v2.json"
 
 # UI configuration
 ui:
-  theme: "soft"
-  show_sources: true
-  show_confidence: true
-  show_retrieved_chunks: false
-  enable_export: true
-  enable_batch_mode: true
-  streaming: true
-  max_history_display: 20
-
-# Validation
-validation:
-  check_ollama_running: true
-  check_models_downloaded: true
-  validate_novel_format: true
-  backup_before_update: true
-
-# Advanced
-advanced:
-  enable_reranking: false
-  custom_stopwords: []
-  min_answer_confidence: 0.3
-  hallucination_detection: true
+  host: "127.0.0.1"
+  port: 8000
+  theme: "dark"
