@@ -1,15 +1,19 @@
-# FastAPI Web Application
+# FastAPI Web Application - Multi-Novel Support
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Optional
 from contextlib import asynccontextmanager
+from queue import Queue
+from threading import Thread
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+from sse_starlette.sse import EventSourceResponse
 
 from ..pipeline import RAGPipeline
 from ..config import get_config
@@ -38,10 +42,19 @@ class QueryResponse(BaseModel):
     timing: dict
 
 
-class IngestRequest(BaseModel):
-    """Request model for ingestion."""
-    novel_path: str
-    force_reindex: bool = False
+class NovelUploadResponse(BaseModel):
+    """Response for novel upload."""
+    id: str
+    title: str
+    author: str
+    status: str
+    chapters: int
+    chunks: int
+
+
+class SelectNovelRequest(BaseModel):
+    """Request to select a novel."""
+    novel_id: str
 
 
 @asynccontextmanager
@@ -49,7 +62,7 @@ async def lifespan(app: FastAPI):
     """Application lifespan - init pipeline."""
     global pipeline
     pipeline = RAGPipeline()
-    logger.info("RAG Pipeline initialized")
+    logger.info("RAG Pipeline initialized (multi-novel mode)")
     yield
     logger.info("Shutting down...")
 
@@ -58,7 +71,7 @@ def create_app() -> FastAPI:
     """Create FastAPI application."""
     app = FastAPI(
         title="Novel RAG Chatbot",
-        description="Ask questions about your novel",
+        description="Chat with your novels - supports multiple books",
         version="2.0.0",
         lifespan=lifespan
     )
@@ -77,14 +90,14 @@ def create_app() -> FastAPI:
         """Serve the main UI."""
         if templates:
             return templates.TemplateResponse("index.html", {"request": request})
-        return HTMLResponse("<html><body><h1>Novel RAG Chatbot</h1><p>Templates not found</p></body></html>")
+        return HTMLResponse("<html><body><h1>Novel RAG Chatbot</h1></body></html>")
     
     @app.get("/api/health")
     async def health():
         """Health check endpoint."""
         return {
             "status": "healthy",
-            "pipeline_ready": pipeline.is_ready() if pipeline else False
+            "ready": pipeline.is_ready() if pipeline else False
         }
     
     @app.get("/api/stats")
@@ -94,38 +107,139 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=500, detail="Pipeline not initialized")
         return pipeline.get_stats()
     
-    @app.post("/api/ingest")
-    async def ingest(request: IngestRequest):
-        """Ingest a novel."""
+    # === Novel Management Endpoints ===
+    
+    @app.get("/api/novels")
+    async def list_novels():
+        """List all novels in the library."""
+        if not pipeline:
+            raise HTTPException(status_code=500, detail="Pipeline not initialized")
+        return {"novels": pipeline.list_novels()}
+    
+    @app.post("/api/novels")
+    async def upload_novel(
+        file: UploadFile = File(...),
+        title: str = Form(None),
+        author: str = Form("Unknown")
+    ):
+        """Upload and process a new novel."""
         if not pipeline:
             raise HTTPException(status_code=500, detail="Pipeline not initialized")
         
-        novel_path = Path(request.novel_path)
-        if not novel_path.exists():
-            raise HTTPException(status_code=404, detail=f"Novel not found: {request.novel_path}")
+        # Validate file type
+        allowed_extensions = [".txt", ".pdf", ".epub"]
+        file_ext = Path(file.filename or "").suffix.lower()
+        if file_ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Unsupported file type. Allowed: {', '.join(allowed_extensions)}"
+            )
+        
+        # Save uploaded file temporarily
+        temp_path = Path("library/uploads") / file.filename
+        temp_path.parent.mkdir(parents=True, exist_ok=True)
         
         try:
-            result = pipeline.ingest_novel(novel_path, request.force_reindex)
+            content = await file.read()
+            temp_path.write_bytes(content)
+            
+            # Add and index novel
+            result = pipeline.add_novel(
+                temp_path,
+                title=title or Path(file.filename).stem,
+                author=author
+            )
+            
+            # Clean up temp file (library creates its own copy)
+            if temp_path.exists():
+                temp_path.unlink()
+            
+            if result["indexing"]["status"] == "error":
+                raise HTTPException(
+                    status_code=500,
+                    detail=result["indexing"]["error"]
+                )
+            
             return result
+            
         except Exception as e:
-            logger.error(f"Ingestion failed: {e}")
+            logger.error(f"Upload failed: {e}")
+            if temp_path.exists():
+                temp_path.unlink()
             raise HTTPException(status_code=500, detail=str(e))
+    
+    @app.get("/api/novels/{novel_id}")
+    async def get_novel(novel_id: str):
+        """Get details for a specific novel."""
+        if not pipeline:
+            raise HTTPException(status_code=500, detail="Pipeline not initialized")
+        
+        novels = pipeline.list_novels()
+        novel = next((n for n in novels if n["id"] == novel_id), None)
+        
+        if not novel:
+            raise HTTPException(status_code=404, detail="Novel not found")
+        
+        return novel
+    
+    @app.delete("/api/novels/{novel_id}")
+    async def delete_novel(novel_id: str):
+        """Delete a novel from the library."""
+        if not pipeline:
+            raise HTTPException(status_code=500, detail="Pipeline not initialized")
+        
+        if pipeline.delete_novel(novel_id):
+            return {"status": "deleted", "id": novel_id}
+        
+        raise HTTPException(status_code=404, detail="Novel not found")
+    
+    @app.post("/api/novels/{novel_id}/select")
+    async def select_novel(novel_id: str):
+        """Select a novel for querying."""
+        if not pipeline:
+            raise HTTPException(status_code=500, detail="Pipeline not initialized")
+        
+        if pipeline.select_novel(novel_id):
+            return {"status": "selected", "novel": pipeline.get_active_novel()}
+        
+        raise HTTPException(
+            status_code=400, 
+            detail="Could not select novel. Make sure it's fully indexed."
+        )
+    
+    @app.post("/api/novels/{novel_id}/reindex")
+    async def reindex_novel(novel_id: str):
+        """Re-index a novel (for incremental updates)."""
+        if not pipeline:
+            raise HTTPException(status_code=500, detail="Pipeline not initialized")
+        
+        result = pipeline.reindex_novel(novel_id)
+        return result
+    
+    @app.get("/api/novels/active")
+    async def get_active_novel():
+        """Get the currently selected novel."""
+        if not pipeline:
+            raise HTTPException(status_code=500, detail="Pipeline not initialized")
+        
+        active = pipeline.get_active_novel()
+        if not active:
+            return {"active": None}
+        return {"active": active}
+    
+    # === Query Endpoints ===
     
     @app.post("/api/query", response_model=QueryResponse)
     async def query(request: QueryRequest):
-        """Query the RAG system."""
+        """Query the active novel."""
         if not pipeline:
             raise HTTPException(status_code=500, detail="Pipeline not initialized")
-        
-        if not pipeline.is_ready():
-            raise HTTPException(status_code=400, detail="No novel indexed. Please ingest a novel first.")
         
         if not request.query.strip():
             raise HTTPException(status_code=400, detail="Query cannot be empty")
         
         try:
             if request.stream:
-                # Return streaming response
                 return StreamingResponse(
                     pipeline.query_stream(request.query),
                     media_type="text/plain"
@@ -151,9 +265,6 @@ def create_app() -> FastAPI:
         """Stream query response."""
         if not pipeline:
             raise HTTPException(status_code=500, detail="Pipeline not initialized")
-        
-        if not pipeline.is_ready():
-            raise HTTPException(status_code=400, detail="No novel indexed. Please ingest a novel first.")
         
         async def generate():
             for token in pipeline.query_stream(request.query):

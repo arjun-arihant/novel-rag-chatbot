@@ -1,4 +1,4 @@
-# RAG Pipeline - Full orchestration
+# Novel RAG Pipeline - Multi-Novel Support
 
 import logging
 from pathlib import Path
@@ -6,10 +6,9 @@ from typing import Optional, Iterator
 from dataclasses import dataclass
 
 from .config import get_config
-from .ollama_client import OllamaClient, get_client
-from .ingestion.loader import NovelLoader
-from .ingestion.chunker import TokenChunker
-from .ingestion.metadata import EntityExtractor, ChapterExtractor
+from .ollama_client import get_client
+from .library import NovelLibrary, get_library
+from .ingestion.indexer import IncrementalIndexer
 from .retrieval.embedder import Embedder
 from .retrieval.vector_store import VectorStore
 from .retrieval.sparse_index import BM25Index
@@ -17,6 +16,7 @@ from .retrieval.hybrid import HybridRetriever
 from .retrieval.reranker import LLMReranker
 from .generation.query_rewriter import QueryRewriter
 from .generation.generator import GroundedGenerator, GenerationResult
+from .ingestion.metadata import EntityExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -36,121 +36,132 @@ class PipelineResult:
 
 class RAGPipeline:
     """
-    Complete RAG pipeline orchestrator.
+    Multi-novel RAG pipeline orchestrator.
     
-    Pipeline flow:
-    1. Query rewriting (temp=0.0)
-    2. Hybrid retrieval (dense + sparse + RRF)
-    3. LLM reranking (constrained prompt)
-    4. Grounded generation (with refusal logic)
+    Supports:
+    - Multiple novels with separate databases
+    - Incremental indexing
+    - Novel selection for queries
     """
     
-    def __init__(self):
+    def __init__(self, library_path: str = "library"):
         self.config = get_config()
         self.client = get_client(self.config.embedding.base_url)
         
-        # Ingestion components
-        self.chunker = TokenChunker(
-            target_tokens=self.config.chunking.target_tokens,
-            min_tokens=self.config.chunking.min_tokens,
-            max_tokens=self.config.chunking.max_tokens,
-            overlap_tokens=self.config.chunking.overlap_tokens,
-            malformed_threshold=self.config.chunking.malformed_threshold
-        )
-        self.entity_extractor = EntityExtractor()
-        self.chapter_extractor = ChapterExtractor()
-        
-        # Retrieval components
+        # Library and indexer
+        self.library = get_library(library_path)
         self.embedder = Embedder(self.client)
-        self.vector_store = VectorStore(
-            persist_path=self.config.paths.chroma_db,
-            embedder=self.embedder
-        )
-        self.bm25_index = BM25Index(persist_path=self.config.paths.bm25_index)
-        self.hybrid_retriever = HybridRetriever(
-            self.vector_store,
-            self.bm25_index,
-            rrf_k=self.config.retrieval.rrf_k
-        )
-        self.reranker = LLMReranker(self.client)
+        self.indexer = IncrementalIndexer(self.embedder, self.library)
         
-        # Generation components
+        # Generation components (shared)
+        self.reranker = LLMReranker(self.client)
         self.query_rewriter = QueryRewriter(self.client)
+        self.entity_extractor = EntityExtractor()
         self.generator = GroundedGenerator(self.client, self.entity_extractor)
         
-        self._initialized = False
-        
-    def ingest_novel(self, novel_path: Path, force_reindex: bool = False) -> dict:
+        # Active novel's retrieval components
+        self._active_retriever: Optional[HybridRetriever] = None
+    
+    def add_novel(
+        self, 
+        file_path: Path, 
+        title: Optional[str] = None,
+        author: str = "Unknown",
+        progress_callback=None
+    ) -> dict:
         """
-        Ingest and index a novel.
+        Add and index a novel.
         
         Args:
-            novel_path: Path to novel text file
-            force_reindex: Whether to clear and rebuild index
+            file_path: Path to novel file
+            title: Optional title (defaults to filename)
+            author: Author name
+            progress_callback: Optional callback(current, total, message)
             
         Returns:
-            Statistics about ingestion
+            Dict with novel metadata and indexing result
         """
-        import time
-        start_time = time.time()
+        # Add to library
+        novel = self.library.add_novel(file_path, title, author)
         
-        # Check if already indexed
-        if not force_reindex and self.vector_store.get_count() > 0:
-            logger.info("Using existing index")
-            if not self.bm25_index.load():
-                self._rebuild_bm25()
-            self._initialized = True
-            return {"status": "skipped", "existing_chunks": self.vector_store.get_count()}
+        # Index
+        result = self.indexer.index_novel(novel.id, progress_callback)
         
-        if force_reindex:
-            logger.info("Clearing existing index...")
-            self.vector_store.clear()
-        
-        # Load novel
-        loader = NovelLoader(novel_path)
-        loader.load()
-        chapters = loader.parse_chapters()
-        
-        # Chunk all chapters
-        all_chunks = []
-        for chapter in chapters:
-            chunks = self.chunker.chunk_chapter(
-                chapter.content,
-                chapter.number,
-                chapter.title
-            )
-            all_chunks.extend(chunks)
-            
-            # Extract entities
-            self.entity_extractor.extract_from_text(chapter.content, chapter.number)
-            self.chapter_extractor.add_chapter(chapter.number, chapter.title, chapter.content)
-            
-        logger.info(f"Created {len(all_chunks)} chunks from {len(chapters)} chapters")
-        
-        # Add to vector store
-        self.vector_store.add_chunks(all_chunks)
-        
-        # Build BM25 index
-        self._rebuild_bm25()
-        
-        self._initialized = True
-        
+        # Return combined info
+        updated_novel = self.library.get_novel(novel.id)
         return {
-            "status": "indexed",
-            "chapters": len(chapters),
-            "chunks": len(all_chunks),
-            "entities": len(self.entity_extractor.get_significant_entities()),
-            "time_seconds": time.time() - start_time
+            "novel": updated_novel.to_dict() if updated_novel else None,
+            "indexing": {
+                "status": result.status,
+                "total_chapters": result.total_chapters,
+                "new_chapters": result.new_chapters,
+                "updated_chapters": result.updated_chapters,
+                "total_chunks": result.total_chunks,
+                "new_chunks": result.new_chunks,
+                "error": result.error_message
+            }
         }
     
-    def _rebuild_bm25(self):
-        """Rebuild BM25 index from vector store."""
-        docs = self.vector_store.get_all_documents()
-        self.bm25_index.build_from_documents(docs)
+    def reindex_novel(self, novel_id: str, progress_callback=None) -> dict:
+        """Re-index a novel (for incremental updates)."""
+        result = self.indexer.index_novel(novel_id, progress_callback)
+        updated_novel = self.library.get_novel(novel_id)
+        return {
+            "novel": updated_novel.to_dict() if updated_novel else None,
+            "indexing": {
+                "status": result.status,
+                "total_chapters": result.total_chapters,
+                "new_chapters": result.new_chapters,
+                "updated_chapters": result.updated_chapters,
+                "total_chunks": result.total_chunks,
+                "new_chunks": result.new_chunks,
+                "error": result.error_message
+            }
+        }
+    
+    def select_novel(self, novel_id: str) -> bool:
+        """
+        Select a novel for querying.
         
+        Args:
+            novel_id: ID of the novel to select
+            
+        Returns:
+            True if selection successful
+        """
+        if not self.library.set_active_novel(novel_id):
+            return False
+        
+        # Load retrieval components for this novel
+        try:
+            vector_store, bm25_index = self.indexer.get_novel_stores(novel_id)
+            self._active_retriever = HybridRetriever(
+                vector_store,
+                bm25_index,
+                rrf_k=self.config.retrieval.rrf_k
+            )
+            logger.info(f"Loaded retrieval components for novel {novel_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to load novel stores: {e}")
+            return False
+    
+    def get_active_novel(self) -> Optional[dict]:
+        """Get the currently selected novel."""
+        novel = self.library.get_active_novel()
+        return novel.to_dict() if novel else None
+    
+    def list_novels(self) -> list[dict]:
+        """List all novels in the library."""
+        return [n.to_dict() for n in self.library.list_novels()]
+    
+    def delete_novel(self, novel_id: str) -> bool:
+        """Delete a novel from the library."""
+        return self.library.delete_novel(novel_id)
+    
     def query(self, user_query: str) -> PipelineResult:
         """
-        Process a user query through the full pipeline.
+        Process a user query against the active novel.
         
         Args:
             user_query: The user's question
@@ -159,6 +170,19 @@ class RAGPipeline:
             PipelineResult with answer and metadata
         """
         import time
+        
+        if not self._active_retriever:
+            return PipelineResult(
+                answer="Please select a novel first.",
+                refused=True,
+                refusal_reason="no_novel_selected",
+                original_query=user_query,
+                rewritten_query="",
+                chapters_cited=[],
+                sources=[],
+                timing={}
+            )
+        
         timing = {}
         
         # Step 1: Query rewriting
@@ -168,7 +192,7 @@ class RAGPipeline:
         
         # Step 2: Hybrid retrieval
         start = time.time()
-        hybrid_results = self.hybrid_retriever.retrieve(rewritten_query)
+        hybrid_results = self._active_retriever.retrieve(rewritten_query)
         timing['retrieval'] = time.time() - start
         
         # Step 3: Reranking
@@ -194,11 +218,15 @@ class RAGPipeline:
     
     def query_stream(self, user_query: str) -> Iterator[str]:
         """Stream query response for UI."""
+        if not self._active_retriever:
+            yield "Please select a novel first."
+            return
+        
         # Rewrite
         rewritten_query = self.query_rewriter.rewrite(user_query)
         
         # Retrieve
-        hybrid_results = self.hybrid_retriever.retrieve(rewritten_query)
+        hybrid_results = self._active_retriever.retrieve(rewritten_query)
         
         # Rerank
         reranked_results = self.reranker.rerank(rewritten_query, hybrid_results)
@@ -208,15 +236,14 @@ class RAGPipeline:
             yield token
     
     def is_ready(self) -> bool:
-        """Check if pipeline is ready for queries."""
-        return self._initialized and self.vector_store.get_count() > 0
+        """Check if pipeline has an active novel."""
+        return self._active_retriever is not None
     
     def get_stats(self) -> dict:
         """Get pipeline statistics."""
+        active = self.library.get_active_novel()
         return {
-            "initialized": self._initialized,
-            "chunks_indexed": self.vector_store.get_count(),
-            "bm25_docs": self.bm25_index.get_count(),
-            "entities": len(self.entity_extractor.get_significant_entities()),
-            "chapters": len(self.chapter_extractor.get_all())
+            "novels_count": len(self.library.list_novels()),
+            "active_novel": active.to_dict() if active else None,
+            "ready": self.is_ready()
         }

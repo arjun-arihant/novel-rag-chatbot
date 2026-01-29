@@ -5,136 +5,123 @@ import logging
 import sys
 from pathlib import Path
 
-import uvicorn
-
-from src.config import get_config, reset_config
-from src.pipeline import RAGPipeline
-from src.ui.app import create_app
-
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('novel_rag.log', mode='a')
+        logging.StreamHandler(),
+        logging.FileHandler('novel_rag.log')
     ]
 )
+
 logger = logging.getLogger(__name__)
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description='Novel RAG Chatbot - Ask questions about your novel'
-    )
+def run_web(host: str = "127.0.0.1", port: int = 8000):
+    """Run the web server."""
+    import uvicorn
+    from src.ui.app import app
     
-    parser.add_argument(
-        '--mode',
-        choices=['web', 'cli', 'ingest'],
-        default='web',
-        help='Run mode: web (default), cli, or ingest-only'
-    )
+    logger.info(f"Starting web server at http://{host}:{port}")
+    uvicorn.run(app, host=host, port=port)
+
+
+def run_cli():
+    """Run interactive CLI mode."""
+    from src.pipeline import RAGPipeline
     
-    parser.add_argument(
-        '--novel',
-        type=str,
-        default='novel.txt',
-        help='Path to novel text file'
-    )
+    print("\n" + "=" * 60)
+    print("  Novel RAG Chatbot - CLI Mode")
+    print("=" * 60 + "\n")
     
-    parser.add_argument(
-        '--config',
-        type=str,
-        default='config.yaml',
-        help='Path to configuration file'
-    )
+    pipeline = RAGPipeline()
     
-    parser.add_argument(
-        '--host',
-        type=str,
-        default='127.0.0.1',
-        help='Host for web server'
-    )
-    
-    parser.add_argument(
-        '--port',
-        type=int,
-        default=8000,
-        help='Port for web server'
-    )
-    
-    parser.add_argument(
-        '--force-reindex',
-        action='store_true',
-        help='Force rebuild of index'
-    )
-    
-    args = parser.parse_args()
-    
-    # Initialize config
-    reset_config()
-    config = get_config(args.config)
-    
-    if args.mode == 'ingest':
-        # Ingest only mode
-        run_ingest(args.novel, args.force_reindex)
-        
-    elif args.mode == 'cli':
-        # CLI mode
-        run_cli(args.novel, args.force_reindex)
-        
+    # Check for novels
+    novels = pipeline.list_novels()
+    if not novels:
+        print("No novels in library. Use 'add <path>' to add a novel.\n")
+        print("Commands:")
+        print("  add <path> [title] [author] - Add a novel")
+        print("  list                        - List all novels")
+        print("  select <id>                 - Select a novel")
+        print("  <question>                  - Ask a question")
+        print("  quit                        - Exit")
+        print()
     else:
-        # Web mode (default)
-        run_web(args.host, args.port, args.novel, args.force_reindex)
-
-
-def run_ingest(novel_path: str, force_reindex: bool):
-    """Run ingestion only."""
-    logger.info(f"Ingesting novel: {novel_path}")
-    
-    pipeline = RAGPipeline()
-    result = pipeline.ingest_novel(Path(novel_path), force_reindex)
-    
-    print(f"\nIngestion complete:")
-    print(f"  Status: {result.get('status')}")
-    print(f"  Chapters: {result.get('chapters', 0)}")
-    print(f"  Chunks: {result.get('chunks', 0)}")
-    print(f"  Entities: {result.get('entities', 0)}")
-    print(f"  Time: {result.get('time_seconds', 0):.2f}s")
-
-
-def run_cli(novel_path: str, force_reindex: bool):
-    """Run CLI interactive mode."""
-    logger.info("Starting CLI mode...")
-    
-    pipeline = RAGPipeline()
-    
-    # Ingest if needed
-    if not pipeline.is_ready() or force_reindex:
-        print(f"Loading novel: {novel_path}")
-        result = pipeline.ingest_novel(Path(novel_path), force_reindex)
-        print(f"Loaded {result.get('chunks', 0)} chunks\n")
-    
-    print("Novel RAG Chatbot - CLI Mode")
-    print("Type 'quit' or 'exit' to stop\n")
+        print(f"Found {len(novels)} novel(s) in library.\n")
+        for n in novels:
+            status = "★" if n.get('status') == 'ready' else "○"
+            print(f"  {status} [{n['id']}] {n['title']} ({n['total_chapters']} chapters)")
+        print()
     
     while True:
         try:
-            query = input("You: ").strip()
+            active = pipeline.get_active_novel()
+            prompt = f"[{active['title'][:20]}] > " if active else "> "
+            user_input = input(prompt).strip()
             
-            if query.lower() in ['quit', 'exit', 'q']:
-                print("Goodbye!")
-                break
-                
-            if not query:
+            if not user_input:
                 continue
             
-            result = pipeline.query(query)
+            if user_input.lower() in ['quit', 'exit', 'q']:
+                print("Goodbye!")
+                break
             
-            print(f"\nAssistant: {result.answer}")
+            if user_input.lower() == 'list':
+                novels = pipeline.list_novels()
+                if not novels:
+                    print("No novels in library.")
+                else:
+                    for n in novels:
+                        status = "★" if n.get('status') == 'ready' else "○"
+                        print(f"  {status} [{n['id']}] {n['title']}")
+                continue
+            
+            if user_input.lower().startswith('add '):
+                parts = user_input[4:].strip().split(' ', 2)
+                file_path = Path(parts[0])
+                title = parts[1] if len(parts) > 1 else None
+                author = parts[2] if len(parts) > 2 else "Unknown"
+                
+                if not file_path.exists():
+                    print(f"File not found: {file_path}")
+                    continue
+                
+                print(f"Adding {file_path.name}...")
+                result = pipeline.add_novel(file_path, title, author)
+                if result["indexing"]["status"] == "error":
+                    print(f"Error: {result['indexing']['error']}")
+                else:
+                    print(f"Added: {result['novel']['title']} ({result['indexing']['total_chapters']} chapters)")
+                    # Auto-select if first novel
+                    if not active:
+                        pipeline.select_novel(result['novel']['id'])
+                        print(f"Selected: {result['novel']['title']}")
+                continue
+            
+            if user_input.lower().startswith('select '):
+                novel_id = user_input[7:].strip()
+                if pipeline.select_novel(novel_id):
+                    novel = pipeline.get_active_novel()
+                    print(f"Selected: {novel['title']}")
+                else:
+                    print("Failed to select novel. Make sure it's indexed.")
+                continue
+            
+            # Query
+            if not pipeline.is_ready():
+                print("Please select a novel first. Use 'select <id>'")
+                continue
+            
+            print()
+            result = pipeline.query(user_input)
+            
+            if result.refused:
+                print(f"[Refused: {result.refusal_reason}]")
+            print(result.answer)
             
             if result.chapters_cited:
-                print(f"\n[Based on: {', '.join(f'Chapter {c}' for c in result.chapters_cited)}]")
+                print(f"\n  Sources: Chapters {', '.join(map(str, result.chapters_cited))}")
             
             print()
             
@@ -143,22 +130,39 @@ def run_cli(novel_path: str, force_reindex: bool):
             break
         except Exception as e:
             logger.error(f"Error: {e}")
-            print(f"Error: {e}\n")
+            print(f"Error: {e}")
 
 
-def run_web(host: str, port: int, novel_path: str, force_reindex: bool):
-    """Run web server."""
-    logger.info(f"Starting web server at http://{host}:{port}")
+def main():
+    """Main entry point."""
+    parser = argparse.ArgumentParser(
+        description='Novel RAG Chatbot - Chat with your novels'
+    )
+    parser.add_argument(
+        '--mode',
+        choices=['web', 'cli'],
+        default='web',
+        help='Run mode: web (default) or cli'
+    )
+    parser.add_argument(
+        '--host',
+        default='127.0.0.1',
+        help='Web server host (default: 127.0.0.1)'
+    )
+    parser.add_argument(
+        '--port',
+        type=int,
+        default=8000,
+        help='Web server port (default: 8000)'
+    )
     
-    # Pre-load if novel exists
-    if Path(novel_path).exists():
-        logger.info(f"Pre-loading novel: {novel_path}")
-        pipeline = RAGPipeline()
-        pipeline.ingest_novel(Path(novel_path), force_reindex)
+    args = parser.parse_args()
     
-    app = create_app()
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    if args.mode == 'web':
+        run_web(args.host, args.port)
+    elif args.mode == 'cli':
+        run_cli()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

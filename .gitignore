@@ -1,61 +1,64 @@
-# Python virtual environments
-project_env/
-venv/
-env/
-ENV/
-.venv/
-
-# Python cache and compiled files
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-
-# Distribution / packaging
 build/
+develop-eggs/
 dist/
-*.egg-info/
+downloads/
+eggs/
 .eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Database files
-chroma_db/
-chroma_db_backup/
-*.db
-*.sqlite
-*.sqlite3
-
-# Environment variables
+# Virtual Environment
+venv/
+env/
 .env
-.env.local
-.env.*.local
 
 # IDE
-.vscode/
 .idea/
+.vscode/
 *.swp
 *.swo
 *~
+
+# Novel RAG Data
+library/
+chroma_db/
+chroma_db_*/
+*.pkl
+uploads/
+
+# Logs
+*.log
+logs/
+
+# Temp files
+*.tmp
+*.bak
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Logs and temporary files
-*.log
-chatlog.txt
-analytics.json
+# Gradio (legacy)
+.gradio/
 
-# Jupyter Notebook
-.ipynb_checkpoints
+# Test files
+test_*.txt
+test_*.pdf
+test_*.epub
 
-# pytest
-.pytest_cache/
-.coverage
-htmlcov/
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
+# Config overrides
+config.local.yaml
+.env.local

@@ -1,148 +1,398 @@
 // Novel RAG Chatbot - Frontend JavaScript
 
-class NovelRAGApp {
+class NovelRAG {
     constructor() {
-        this.elements = {
-            queryForm: document.getElementById('queryForm'),
-            queryInput: document.getElementById('queryInput'),
-            submitBtn: document.getElementById('submitBtn'),
-            messages: document.getElementById('messages'),
-            status: document.getElementById('status'),
-            sidebar: document.getElementById('sidebar'),
-            sourcesList: document.getElementById('sourcesList'),
-            closeSidebar: document.getElementById('closeSidebar'),
-            ingestModal: document.getElementById('ingestModal'),
-            novelPath: document.getElementById('novelPath'),
-            ingestBtn: document.getElementById('ingestBtn'),
-            cancelIngest: document.getElementById('cancelIngest'),
-            ingestStatus: document.getElementById('ingestStatus'),
-        };
+        this.activeNovel = null;
+        this.novels = [];
+        this.pendingFile = null;
 
-        this.isLoading = false;
-        this.currentSources = [];
-        
         this.init();
     }
 
     init() {
+        this.bindElements();
         this.bindEvents();
-        this.checkHealth();
-        this.autoResizeTextarea();
+        this.loadTheme();
+        this.loadNovels();
+    }
+
+    bindElements() {
+        // Header
+        this.libraryToggle = document.getElementById('libraryToggle');
+        this.themeToggle = document.getElementById('themeToggle');
+        this.activeNovelDisplay = document.getElementById('activeNovel');
+
+        // Library panel
+        this.libraryPanel = document.getElementById('libraryPanel');
+        this.closeLibrary = document.getElementById('closeLibrary');
+        this.uploadZone = document.getElementById('uploadZone');
+        this.fileInput = document.getElementById('fileInput');
+        this.novelsList = document.getElementById('novelsList');
+
+        // Chat
+        this.messages = document.getElementById('messages');
+        this.welcomeMessage = document.getElementById('welcomeMessage');
+        this.openLibraryBtn = document.getElementById('openLibraryBtn');
+        this.queryForm = document.getElementById('queryForm');
+        this.queryInput = document.getElementById('queryInput');
+        this.submitBtn = document.getElementById('submitBtn');
+
+        // Sources
+        this.sourcesPanel = document.getElementById('sourcesPanel');
+        this.closeSources = document.getElementById('closeSources');
+        this.sourcesList = document.getElementById('sourcesList');
+
+        // Modals
+        this.processingModal = document.getElementById('processingModal');
+        this.processingTitle = document.getElementById('processingTitle');
+        this.processingStatus = document.getElementById('processingStatus');
+        this.progressFill = document.getElementById('progressFill');
+        this.progressText = document.getElementById('progressText');
+
+        this.uploadModal = document.getElementById('uploadModal');
+        this.uploadForm = document.getElementById('uploadForm');
+        this.bookTitle = document.getElementById('bookTitle');
+        this.bookAuthor = document.getElementById('bookAuthor');
+        this.cancelUpload = document.getElementById('cancelUpload');
     }
 
     bindEvents() {
-        // Query form
-        this.elements.queryForm.addEventListener('submit', (e) => {
+        // Library toggle
+        this.libraryToggle.addEventListener('click', () => this.toggleLibrary());
+        this.closeLibrary.addEventListener('click', () => this.toggleLibrary(false));
+        this.openLibraryBtn?.addEventListener('click', () => this.toggleLibrary(true));
+
+        // Theme toggle
+        this.themeToggle.addEventListener('click', () => this.toggleTheme());
+
+        // Upload
+        this.uploadZone.addEventListener('click', () => this.fileInput.click());
+        this.fileInput.addEventListener('change', (e) => this.handleFileSelect(e));
+
+        // Drag and drop
+        this.uploadZone.addEventListener('dragover', (e) => {
             e.preventDefault();
-            this.submitQuery();
+            this.uploadZone.classList.add('dragover');
+        });
+        this.uploadZone.addEventListener('dragleave', () => {
+            this.uploadZone.classList.remove('dragover');
+        });
+        this.uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            this.uploadZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length) {
+                this.handleFile(e.dataTransfer.files[0]);
+            }
         });
 
-        // Auto-resize textarea
-        this.elements.queryInput.addEventListener('input', () => {
-            this.autoResizeTextarea();
-        });
+        // Upload form
+        this.uploadForm.addEventListener('submit', (e) => this.handleUploadSubmit(e));
+        this.cancelUpload.addEventListener('click', () => this.closeUploadModal());
 
-        // Enter to submit (Shift+Enter for newline)
-        this.elements.queryInput.addEventListener('keydown', (e) => {
+        // Query form
+        this.queryForm.addEventListener('submit', (e) => this.handleQuery(e));
+        this.queryInput.addEventListener('input', () => this.autoResizeTextarea());
+        this.queryInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                this.submitQuery();
+                this.queryForm.dispatchEvent(new Event('submit'));
             }
         });
 
-        // Sidebar
-        this.elements.closeSidebar.addEventListener('click', () => {
-            this.elements.sidebar.classList.remove('open');
-        });
+        // Sources
+        this.closeSources?.addEventListener('click', () => this.toggleSources(false));
 
-        // Ingest modal
-        this.elements.ingestBtn.addEventListener('click', () => this.ingestNovel());
-        this.elements.cancelIngest.addEventListener('click', () => {
-            this.elements.ingestModal.classList.remove('open');
-        });
-    }
-
-    autoResizeTextarea() {
-        const textarea = this.elements.queryInput;
-        textarea.style.height = 'auto';
-        textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
-    }
-
-    async checkHealth() {
-        try {
-            const response = await fetch('/api/health');
-            const data = await response.json();
-            
-            if (data.pipeline_ready) {
-                this.setStatus('ready', 'Ready');
-            } else {
-                this.setStatus('warning', 'No novel loaded');
-                this.elements.ingestModal.classList.add('open');
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'k' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                this.toggleLibrary();
             }
-        } catch (error) {
-            this.setStatus('error', 'Connection failed');
+        });
+    }
+
+    // === Theme ===
+
+    loadTheme() {
+        const theme = localStorage.getItem('theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', theme);
+    }
+
+    toggleTheme() {
+        const current = document.documentElement.getAttribute('data-theme');
+        const next = current === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem('theme', next);
+    }
+
+    // === Library ===
+
+    toggleLibrary(open = null) {
+        if (open === null) {
+            this.libraryPanel.classList.toggle('open');
+        } else if (open) {
+            this.libraryPanel.classList.add('open');
+        } else {
+            this.libraryPanel.classList.remove('open');
         }
     }
 
-    setStatus(state, text) {
-        this.elements.status.className = 'status ' + state;
-        this.elements.status.querySelector('.status-text').textContent = text;
+    async loadNovels() {
+        try {
+            const response = await fetch('/api/novels');
+            const data = await response.json();
+            this.novels = data.novels || [];
+            this.renderNovelsList();
+            await this.loadActiveNovel();
+        } catch (error) {
+            console.error('Failed to load novels:', error);
+        }
     }
 
-    async ingestNovel() {
-        const path = this.elements.novelPath.value.trim();
-        if (!path) return;
-
-        this.elements.ingestBtn.disabled = true;
-        this.elements.ingestStatus.textContent = 'Loading novel...';
-        this.elements.ingestStatus.className = 'ingest-status';
-
+    async loadActiveNovel() {
         try {
-            const response = await fetch('/api/ingest', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ novel_path: path, force_reindex: false })
+            const response = await fetch('/api/novels/active');
+            const data = await response.json();
+            if (data.active) {
+                this.setActiveNovel(data.active);
+            }
+        } catch (error) {
+            console.error('Failed to load active novel:', error);
+        }
+    }
+
+    renderNovelsList() {
+        if (!this.novels.length) {
+            this.novelsList.innerHTML = '<p class="empty-state">No books yet. Upload one to get started!</p>';
+            return;
+        }
+
+        this.novelsList.innerHTML = this.novels.map(novel => `
+            <div class="novel-card ${novel.id === this.activeNovel?.id ? 'active' : ''}" data-id="${novel.id}">
+                <div class="novel-icon ${novel.format}">
+                    ${this.getFormatIcon(novel.format)}
+                </div>
+                <div class="novel-info">
+                    <div class="novel-title">${this.escapeHtml(novel.title)}</div>
+                    <div class="novel-meta">${novel.chapters_indexed} chapters · ${novel.chunks_count} chunks</div>
+                </div>
+                <div class="novel-actions">
+                    <button class="novel-action delete" title="Delete" data-id="${novel.id}">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 6h18"></path>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
+                            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        `).join('');
+
+        // Bind events
+        this.novelsList.querySelectorAll('.novel-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+                if (!e.target.closest('.novel-actions')) {
+                    this.selectNovel(card.dataset.id);
+                }
+            });
+        });
+
+        this.novelsList.querySelectorAll('.novel-action.delete').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.deleteNovel(btn.dataset.id);
+            });
+        });
+    }
+
+    getFormatIcon(format) {
+        const icons = {
+            txt: '📄',
+            pdf: '📕',
+            epub: '📗'
+        };
+        return icons[format] || '📖';
+    }
+
+    async selectNovel(novelId) {
+        try {
+            const response = await fetch(`/api/novels/${novelId}/select`, {
+                method: 'POST'
             });
 
-            const data = await response.json();
-
-            if (response.ok) {
-                this.elements.ingestStatus.textContent = 
-                    `Loaded ${data.chapters || 0} chapters, ${data.chunks || 0} chunks`;
-                this.elements.ingestStatus.className = 'ingest-status success';
-                this.setStatus('ready', 'Ready');
-                
-                setTimeout(() => {
-                    this.elements.ingestModal.classList.remove('open');
-                }, 1500);
-            } else {
-                throw new Error(data.detail || 'Ingestion failed');
+            if (!response.ok) {
+                const error = await response.json();
+                alert(error.detail || 'Failed to select novel');
+                return;
             }
+
+            const data = await response.json();
+            this.setActiveNovel(data.novel);
+            this.toggleLibrary(false);
+
         } catch (error) {
-            this.elements.ingestStatus.textContent = error.message;
-            this.elements.ingestStatus.className = 'ingest-status error';
-        } finally {
-            this.elements.ingestBtn.disabled = false;
+            console.error('Failed to select novel:', error);
+            alert('Failed to select novel');
         }
     }
 
-    async submitQuery() {
-        const query = this.elements.queryInput.value.trim();
-        if (!query || this.isLoading) return;
+    setActiveNovel(novel) {
+        this.activeNovel = novel;
 
-        this.isLoading = true;
-        this.elements.submitBtn.disabled = true;
-        this.elements.queryInput.value = '';
-        this.autoResizeTextarea();
+        // Update UI
+        if (novel) {
+            this.activeNovelDisplay.classList.add('has-novel');
+            this.activeNovelDisplay.querySelector('.novel-label').textContent = novel.title;
+            this.queryInput.disabled = false;
+            this.submitBtn.disabled = false;
+            this.queryInput.placeholder = `Ask about "${novel.title}"...`;
 
-        // Clear welcome message
-        const welcome = this.elements.messages.querySelector('.welcome-message');
-        if (welcome) welcome.remove();
+            // Hide welcome, show ready state
+            if (this.welcomeMessage) {
+                this.welcomeMessage.remove();
+            }
+        } else {
+            this.activeNovelDisplay.classList.remove('has-novel');
+            this.activeNovelDisplay.querySelector('.novel-label').textContent = 'No book selected';
+            this.queryInput.disabled = true;
+            this.submitBtn.disabled = true;
+            this.queryInput.placeholder = 'Select a book first...';
+        }
+
+        this.renderNovelsList();
+    }
+
+    async deleteNovel(novelId) {
+        if (!confirm('Are you sure you want to delete this book?')) return;
+
+        try {
+            const response = await fetch(`/api/novels/${novelId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                this.novels = this.novels.filter(n => n.id !== novelId);
+                if (this.activeNovel?.id === novelId) {
+                    this.setActiveNovel(null);
+                }
+                this.renderNovelsList();
+            } else {
+                alert('Failed to delete novel');
+            }
+        } catch (error) {
+            console.error('Failed to delete novel:', error);
+            alert('Failed to delete novel');
+        }
+    }
+
+    // === Upload ===
+
+    handleFileSelect(e) {
+        if (e.target.files.length) {
+            this.handleFile(e.target.files[0]);
+        }
+    }
+
+    handleFile(file) {
+        const validTypes = ['.txt', '.pdf', '.epub'];
+        const ext = '.' + file.name.split('.').pop().toLowerCase();
+
+        if (!validTypes.includes(ext)) {
+            alert(`Invalid file type. Supported: ${validTypes.join(', ')}`);
+            return;
+        }
+
+        this.pendingFile = file;
+        this.bookTitle.value = file.name.replace(/\.[^/.]+$/, '');
+        this.bookAuthor.value = 'Unknown';
+        this.uploadModal.classList.add('open');
+    }
+
+    closeUploadModal() {
+        this.uploadModal.classList.remove('open');
+        this.pendingFile = null;
+    }
+
+    async handleUploadSubmit(e) {
+        e.preventDefault();
+
+        if (!this.pendingFile) return;
+
+        const formData = new FormData();
+        formData.append('file', this.pendingFile);
+        formData.append('title', this.bookTitle.value || this.pendingFile.name);
+        formData.append('author', this.bookAuthor.value || 'Unknown');
+
+        this.closeUploadModal();
+        this.showProcessing('Processing your book...', 'Uploading file...');
+
+        try {
+            const response = await fetch('/api/novels', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'Upload failed');
+            }
+
+            const result = await response.json();
+
+            // Simulate processing progress (actual progress would need SSE)
+            for (let i = 0; i <= 100; i += 10) {
+                this.updateProgress(i, `Indexing chapters...`);
+                await this.delay(100);
+            }
+
+            this.hideProcessing();
+
+            // Add to list and select
+            this.novels.push(result.novel);
+            this.renderNovelsList();
+            await this.selectNovel(result.novel.id);
+
+        } catch (error) {
+            console.error('Upload failed:', error);
+            this.hideProcessing();
+            alert(`Upload failed: ${error.message}`);
+        }
+
+        this.pendingFile = null;
+    }
+
+    showProcessing(title, status) {
+        this.processingTitle.textContent = title;
+        this.processingStatus.textContent = status;
+        this.progressFill.style.width = '0%';
+        this.progressText.textContent = '0%';
+        this.processingModal.classList.add('open');
+    }
+
+    updateProgress(percent, status) {
+        this.progressFill.style.width = `${percent}%`;
+        this.progressText.textContent = `${percent}%`;
+        if (status) this.processingStatus.textContent = status;
+    }
+
+    hideProcessing() {
+        this.processingModal.classList.remove('open');
+    }
+
+    // === Query ===
+
+    async handleQuery(e) {
+        e.preventDefault();
+
+        const query = this.queryInput.value.trim();
+        if (!query || !this.activeNovel) return;
 
         // Add user message
         this.addMessage(query, 'user');
+        this.queryInput.value = '';
+        this.autoResizeTextarea();
 
-        // Add loading indicator
+        // Show loading
         const loadingEl = this.addLoading();
 
         try {
@@ -152,100 +402,116 @@ class NovelRAGApp {
                 body: JSON.stringify({ query, stream: false })
             });
 
-            const data = await response.json();
-
-            if (response.ok) {
-                loadingEl.remove();
-                this.addAssistantMessage(data);
-                this.currentSources = data.sources || [];
-                this.updateSources();
-            } else {
-                throw new Error(data.detail || 'Query failed');
+            if (!response.ok) {
+                throw new Error('Query failed');
             }
-        } catch (error) {
+
+            const result = await response.json();
+
+            // Remove loading
             loadingEl.remove();
-            this.addMessage(`Error: ${error.message}`, 'assistant', true);
-        } finally {
-            this.isLoading = false;
-            this.elements.submitBtn.disabled = false;
-            this.elements.queryInput.focus();
+
+            // Add response
+            this.addMessage(result.answer, 'assistant', {
+                refused: result.refused,
+                chapters: result.chapters_cited,
+                sources: result.sources
+            });
+
+            // Update sources panel
+            if (result.sources?.length) {
+                this.showSources(result.sources);
+            }
+
+        } catch (error) {
+            console.error('Query failed:', error);
+            loadingEl.remove();
+            this.addMessage('Sorry, something went wrong. Please try again.', 'assistant', { refused: true });
         }
     }
 
-    addMessage(content, type, isError = false) {
+    addMessage(content, type, options = {}) {
         const div = document.createElement('div');
-        div.className = `message ${type}` + (isError ? ' refused' : '');
-        div.innerHTML = `<div class="content">${this.escapeHtml(content)}</div>`;
-        this.elements.messages.appendChild(div);
-        this.scrollToBottom();
+        div.className = `message ${type}`;
+        if (options.refused) div.classList.add('refused');
+
+        if (type === 'assistant') {
+            let html = `<div class="content">${this.escapeHtml(content)}</div>`;
+
+            if (options.chapters?.length) {
+                html += `
+                    <div class="citations">
+                        Sources: ${options.chapters.map(c => `Chapter ${c}`).join(', ')}
+                        <button class="view-sources">View</button>
+                    </div>
+                `;
+            }
+
+            div.innerHTML = html;
+
+            div.querySelector('.view-sources')?.addEventListener('click', () => {
+                this.toggleSources(true);
+            });
+        } else {
+            div.textContent = content;
+        }
+
+        this.messages.appendChild(div);
+        this.messages.scrollTop = this.messages.scrollHeight;
+
         return div;
-    }
-
-    addAssistantMessage(data) {
-        const div = document.createElement('div');
-        div.className = 'message assistant' + (data.refused ? ' refused' : '');
-        
-        let html = `<div class="content">${this.formatAnswer(data.answer)}</div>`;
-        
-        if (data.chapters_cited && data.chapters_cited.length > 0) {
-            html += `
-                <div class="citations">
-                    Based on: ${data.chapters_cited.map(c => `Chapter ${c}`).join(', ')}
-                    <button onclick="app.showSources()">View sources</button>
-                </div>
-            `;
-        }
-        
-        div.innerHTML = html;
-        this.elements.messages.appendChild(div);
-        this.scrollToBottom();
     }
 
     addLoading() {
         const div = document.createElement('div');
         div.className = 'message assistant loading';
-        div.innerHTML = '<span></span><span></span><span></span>';
-        this.elements.messages.appendChild(div);
-        this.scrollToBottom();
+        div.innerHTML = '<div class="loading"><span></span><span></span><span></span></div>';
+        this.messages.appendChild(div);
+        this.messages.scrollTop = this.messages.scrollHeight;
         return div;
     }
 
-    showSources() {
-        this.elements.sidebar.classList.add('open');
+    // === Sources ===
+
+    toggleSources(open = null) {
+        if (open === null) {
+            this.sourcesPanel.classList.toggle('open');
+        } else if (open) {
+            this.sourcesPanel.classList.add('open');
+        } else {
+            this.sourcesPanel.classList.remove('open');
+        }
     }
 
-    updateSources() {
-        if (!this.currentSources.length) {
-            this.elements.sourcesList.innerHTML = '<p class="no-sources">No sources available</p>';
-            return;
-        }
-
-        this.elements.sourcesList.innerHTML = this.currentSources.map(source => `
+    showSources(sources) {
+        this.sourcesList.innerHTML = sources.map(source => `
             <div class="source-card">
-                <div class="chapter">Chapter ${source.chapter_number}: ${this.escapeHtml(source.chapter_title)}</div>
-                <div class="excerpt">${this.escapeHtml(source.content)}</div>
+                <div class="chapter">Chapter ${source.chapter_number}: ${this.escapeHtml(source.chapter_title || '')}</div>
+                <div class="excerpt">${this.escapeHtml(source.content?.substring(0, 200) || '')}...</div>
             </div>
         `).join('');
     }
 
-    scrollToBottom() {
-        this.elements.messages.scrollTop = this.elements.messages.scrollHeight;
+    // === Utilities ===
+
+    autoResizeTextarea() {
+        this.queryInput.style.height = 'auto';
+        this.queryInput.style.height = Math.min(this.queryInput.scrollHeight, 200) + 'px';
     }
 
     escapeHtml(text) {
+        if (!text) return '';
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
     }
 
-    formatAnswer(text) {
-        // Convert [Chapter X] citations to styled spans
-        return this.escapeHtml(text).replace(
-            /\[Chapter\s+(\d+)\]/gi,
-            '<span class="citation">[Chapter $1]</span>'
-        );
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 }
 
-// Initialize app
-const app = new NovelRAGApp();
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    window.novelRAG = new NovelRAG();
+});

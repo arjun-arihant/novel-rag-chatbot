@@ -30,12 +30,18 @@ class RetrievedDoc:
 class VectorStore:
     """ChromaDB vector store for dense retrieval."""
     
-    COLLECTION_NAME = "novel_chunks"
+    DEFAULT_COLLECTION = "novel_chunks"
     
-    def __init__(self, persist_path: Optional[Path] = None, embedder: Optional[Embedder] = None):
+    def __init__(
+        self, 
+        persist_path: Optional[Path] = None, 
+        embedder: Optional[Embedder] = None,
+        collection_name: Optional[str] = None
+    ):
         config = get_config()
         self.persist_path = persist_path or config.paths.chroma_db
         self.embedder = embedder or Embedder()
+        self.collection_name = collection_name or self.DEFAULT_COLLECTION
         
         # Initialize ChromaDB
         self.client = chromadb.PersistentClient(
@@ -45,7 +51,7 @@ class VectorStore:
         
         # Get or create collection
         self.collection = self.client.get_or_create_collection(
-            name=self.COLLECTION_NAME,
+            name=self.collection_name,
             metadata={"hnsw:space": "cosine"}
         )
         
@@ -82,6 +88,7 @@ class VectorStore:
         )
         
         logger.info(f"Added {len(chunks)} chunks to vector store")
+        return ids  # Return IDs for tracking
         
     def search(
         self,
@@ -131,11 +138,21 @@ class VectorStore:
     
     def clear(self):
         """Clear all documents."""
-        self.client.delete_collection(self.COLLECTION_NAME)
+        self.client.delete_collection(self.collection_name)
         self.collection = self.client.get_or_create_collection(
-            name=self.COLLECTION_NAME,
+            name=self.collection_name,
             metadata={"hnsw:space": "cosine"}
         )
+    
+    def delete_chunks(self, chunk_ids: list[str]):
+        """Delete specific chunks by ID."""
+        if not chunk_ids:
+            return
+        try:
+            self.collection.delete(ids=chunk_ids)
+            logger.info(f"Deleted {len(chunk_ids)} chunks")
+        except Exception as e:
+            logger.warning(f"Failed to delete chunks: {e}")
         
     def get_all_documents(self) -> List[Tuple[str, Dict]]:
         """Get all documents (for BM25 index building)."""
