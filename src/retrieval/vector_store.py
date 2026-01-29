@@ -75,9 +75,9 @@ class VectorStore:
             for c in chunks
         ]
         
-        # Generate embeddings
+        # Generate embeddings (using document prefix for indexing)
         logger.info(f"Generating embeddings for {len(chunks)} chunks...")
-        embeddings = self.embedder.embed_batch(documents)
+        embeddings = self.embedder.embed_documents(documents)
         
         # Add to collection
         self.collection.add(
@@ -97,8 +97,8 @@ class VectorStore:
         filter_metadata: Optional[Dict[str, Any]] = None
     ) -> List[RetrievedDoc]:
         """Search for similar chunks."""
-        # Get query embedding
-        query_embedding = self.embedder.embed(query)
+        # Get query embedding (using query prefix for searching)
+        query_embedding = self.embedder.embed_query(query)
         
         # Search
         where_filter = filter_metadata if filter_metadata else None

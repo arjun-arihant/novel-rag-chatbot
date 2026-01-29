@@ -1,4 +1,4 @@
-# LLM Reranker - Constrained scoring with JSON output
+# LLM Reranker - Constrained scoring with JSON output (Qwen3 optimized)
 
 import json
 import re
@@ -24,29 +24,18 @@ class RerankResult:
     metadata: dict
 
 
-# STRICT reranker prompt - prevents over-scoring
-RERANK_PROMPT = """Score ONLY whether this passage DIRECTLY contains information needed to answer the query.
-
-Query: {query}
-Passage: {passage}
-
-Scoring rules:
-- 0-2: Passage is unrelated or only mentions same topic
-- 3-5: Passage contains related but not directly useful info  
-- 6-8: Passage directly answers part of the query
-- 9-10: Passage fully answers the query
-
-Do NOT score based on general topic similarity.
-Return ONLY valid JSON: {{"score": <0-10>, "reason": "<max 10 words>"}}"""
+# Reranker prompt from prompts.py
+from ..generation.prompts import RERANK_PROMPT
 
 
 class LLMReranker:
     """
     LLM-based reranker with strict scoring.
     
-    - Temperature 0.0 for deterministic output
-    - JSON format enforced
-    - Aggressive output parsing/validation
+    Optimized for Qwen3:
+    - /no_think directive in prompt
+    - Thinking tag stripping as fallback
+    - Robust JSON extraction
     """
     
     def __init__(self, client: Optional[OllamaClient] = None):
@@ -62,14 +51,6 @@ class LLMReranker:
     ) -> List[RerankResult]:
         """
         Rerank documents using LLM scoring.
-        
-        Args:
-            query: The user query
-            documents: List of FusedResult from hybrid retrieval
-            top_k: Number of results to return (default from config)
-            
-        Returns:
-            Reranked results sorted by score
         """
         top_k = top_k or self.config.retrieval.final_top_k
         results = []
@@ -89,12 +70,17 @@ class LLMReranker:
         # Sort by score descending
         results.sort(key=lambda x: -x.rerank_score)
         
+        # Log top scores for debugging
+        if results:
+            top_scores = [f"{r.rerank_score:.1f}" for r in results[:3]]
+            logger.info(f"Rerank top scores: {', '.join(top_scores)}")
+        
         return results[:top_k]
     
     def _score_document(self, query: str, passage: str) -> Tuple[float, str]:
         """Score a single document."""
         # Truncate passage if too long
-        max_passage_len = 1500
+        max_passage_len = 1200
         if len(passage) > max_passage_len:
             passage = passage[:max_passage_len] + "..."
         
@@ -105,12 +91,15 @@ class LLMReranker:
                 model=self.model,
                 prompt=prompt,
                 temperature=0.0,
-                max_tokens=64,
+                max_tokens=128,  # Increased for safety
                 format="json"
             )
             
-            # Aggressive cleanup and extraction
+            # Get raw content
             content = response.content.strip()
+            
+            # Strip thinking tags if present (Qwen3 fallback)
+            content = self._strip_thinking_tags(content)
             
             # Try to extract JSON
             parsed = self._extract_json(content)
@@ -118,15 +107,23 @@ class LLMReranker:
             if parsed:
                 score = float(parsed.get('score', 0))
                 score = max(0.0, min(10.0, score))  # Clamp to 0-10
-                reason = str(parsed.get('reason', ''))[:50]  # Truncate reason
+                reason = str(parsed.get('reason', ''))[:50]
                 return score, reason
             else:
                 logger.warning(f"Failed to parse rerank response: {content[:100]}")
-                return 0.0, "parse_error"
+                # Fallback: try to find any number in the response
+                return self._fallback_score(content)
                 
         except Exception as e:
             logger.error(f"Rerank error: {e}")
-            return 0.0, "error"
+            return 5.0, "error_fallback"  # Neutral score on error
+    
+    def _strip_thinking_tags(self, text: str) -> str:
+        """Remove Qwen3 thinking tags from output."""
+        # Pattern to match <think>...</think> blocks
+        pattern = r'<think>.*?</think>'
+        cleaned = re.sub(pattern, '', text, flags=re.DOTALL)
+        return cleaned.strip()
     
     def _extract_json(self, text: str) -> Optional[dict]:
         """Extract JSON from potentially messy LLM output."""
@@ -155,6 +152,21 @@ class LLMReranker:
                 pass
         
         return None
+    
+    def _fallback_score(self, text: str) -> Tuple[float, str]:
+        """Fallback scoring when JSON fails - look for any number."""
+        # Find any number in the text
+        numbers = re.findall(r'\b(\d+(?:\.\d+)?)\b', text)
+        for num in numbers:
+            try:
+                score = float(num)
+                if 0 <= score <= 10:
+                    return score, "fallback_extracted"
+            except:
+                continue
+        
+        # Ultimate fallback - neutral score
+        return 5.0, "parse_failed"
     
     def get_min_score_threshold(self) -> float:
         """Get minimum rerank score for refusal logic."""

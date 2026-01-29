@@ -8,31 +8,31 @@ embedding:
 
 # Query rewriter - ultra-strict, deterministic
 query_rewriter:
-  model: "llama3.1:8b"
+  model: "qwen3:8b"
   base_url: "http://localhost:11434"
   temperature: 0.0
   max_tokens: 128
 
 # Reranker - JSON output, constrained scoring
 reranker:
-  model: "llama3.1:8b"
+  model: "qwen3:8b"
   base_url: "http://localhost:11434"
   temperature: 0.0
   max_tokens: 64
 
 # Answer generator - grounded, concise
 generator:
-  model: "llama3.1:8b"
+  model: "qwen3:8b"
   base_url: "http://localhost:11434"
   temperature: 0.25
   max_tokens: 512
 
-# Chunking - token-based with overlap
+# Chunking - smaller chunks for precision
 chunking:
-  target_tokens: 500     # ~2000 chars
-  min_tokens: 400
-  max_tokens: 800
-  overlap_tokens: 100
+  target_tokens: 300     # ~1200 chars (reduced for better precision)
+  min_tokens: 200
+  max_tokens: 500
+  overlap_tokens: 75
   malformed_threshold: 0.1  # Fallback to paragraph if >10% malformed sentences
 
 # Retrieval parameters
@@ -42,14 +42,14 @@ retrieval:
   fusion_top_k: 10
   final_top_k: 5
   rrf_k: 60              # RRF constant
-  min_rerank_score: 3.0  # Refuse if top score below this
+  min_rerank_score: 2.0  # Refuse if top score below this (lowered for Qwen3)
 
 # Paths
 paths:
   novel: "novel.txt"
-  chroma_db: "chroma_db_v2"
+  chroma_db: "chroma_db"
   bm25_index: "bm25_index.pkl"
-  chapter_index: "chapter_index_v2.json"
+  chapter_index: "chapter_index.json"
 
 # UI configuration
 ui:
