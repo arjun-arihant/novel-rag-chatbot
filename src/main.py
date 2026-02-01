@@ -28,7 +28,18 @@ def run_web(host: str = "127.0.0.1", port: int = 8000):
 
 def run_cli():
     """Run interactive CLI mode."""
-    from src.pipeline import RAGPipeline
+    from src.config import get_config
+    
+    config = get_config()
+    mode = getattr(config, 'pipeline_mode', 'simple')
+    
+    # Import appropriate pipeline
+    if mode == "simple":
+        from src.simple_pipeline import SimpleRAGPipeline as RAGPipeline
+        print("\n  Mode: SIMPLE (fast, dense retrieval only)")
+    else:
+        from src.pipeline import RAGPipeline
+        print("\n  Mode: ADVANCED (hybrid + reranking)")
     
     print("\n" + "=" * 60)
     print("  Novel RAG Chatbot - CLI Mode")

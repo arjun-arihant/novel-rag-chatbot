@@ -1,4 +1,9 @@
-# Novel RAG Chatbot v2 Configuration
+# Novel RAG Chatbot Configuration
+
+# Pipeline mode: "simple" (recommended) or "advanced" (hybrid+reranking)
+# simple: Dense retrieval only, no query rewrite, no reranking - FAST
+# advanced: Query rewrite + Hybrid + LLM reranking - SLOW but thorough
+pipeline_mode: "simple"
 
 # Embedding model (local Ollama)
 embedding:

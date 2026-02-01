@@ -15,13 +15,12 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
-from ..pipeline import RAGPipeline
 from ..config import get_config
 
 logger = logging.getLogger(__name__)
 
-# Global pipeline instance
-pipeline: Optional[RAGPipeline] = None
+# Global pipeline instance - will be initialized based on config
+pipeline = None
 
 
 class QueryRequest(BaseModel):
@@ -61,8 +60,20 @@ class SelectNovelRequest(BaseModel):
 async def lifespan(app: FastAPI):
     """Application lifespan - init pipeline."""
     global pipeline
-    pipeline = RAGPipeline()
-    logger.info("RAG Pipeline initialized (multi-novel mode)")
+    
+    # Determine pipeline mode from config
+    config = get_config()
+    mode = getattr(config, 'pipeline_mode', 'simple')
+    
+    if mode == "simple":
+        from ..simple_pipeline import SimpleRAGPipeline
+        pipeline = SimpleRAGPipeline()
+        logger.info("RAG Pipeline initialized (SIMPLE mode - dense retrieval only)")
+    else:
+        from ..pipeline import RAGPipeline
+        pipeline = RAGPipeline()
+        logger.info("RAG Pipeline initialized (ADVANCED mode - hybrid + reranking)")
+    
     yield
     logger.info("Shutting down...")
 
