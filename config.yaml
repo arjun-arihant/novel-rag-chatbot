@@ -1,29 +1,34 @@
-# Novel RAG Chatbot v2 Configuration
+# Novel RAG Chatbot Configuration
 
-# Embedding model (local Ollama)
+# Pipeline mode: "simple" (recommended) or "advanced" (hybrid+reranking)
+# simple: Dense retrieval only, no query rewrite, no reranking - FAST
+# advanced: Query rewrite + Hybrid + LLM reranking - SLOW but thorough
+pipeline_mode: "simple"
+
+# Embedding model (local Ollama on Arjun's PC)
 embedding:
   model: "qwen3-embedding:0.6b"
-  base_url: "http://localhost:11434"
+  base_url: "http://192.168.29.55:11434"
   dimension: 1024
 
 # Query rewriter - ultra-strict, deterministic
 query_rewriter:
   model: "qwen3:8b"
-  base_url: "http://localhost:11434"
+  base_url: "http://192.168.29.55:11434"
   temperature: 0.0
   max_tokens: 128
 
 # Reranker - JSON output, constrained scoring
 reranker:
   model: "qwen3:8b"
-  base_url: "http://localhost:11434"
+  base_url: "http://192.168.29.55:11434"
   temperature: 0.0
   max_tokens: 64
 
 # Answer generator - grounded, concise
 generator:
   model: "qwen3:8b"
-  base_url: "http://localhost:11434"
+  base_url: "http://192.168.29.55:11434"
   temperature: 0.25
   max_tokens: 512
 

@@ -8,12 +8,13 @@ A local-first, privacy-focused chatbot that lets you have intelligent conversati
 
 ## ✨ Features
 
+- **Two Pipeline Modes** — Simple mode (fast, reliable) or Advanced mode (hybrid + reranking)
 - **Multi-Novel Library** — Manage multiple books with separate vector databases
 - **Multi-Format Support** — Upload `.txt`, `.pdf`, and `.epub` files
 - **Incremental Indexing** — Re-upload with new chapters; only new content is processed
 - **Grounded Answers** — Every response cites specific chapters from your novel
-- **Hybrid Search** — Combines semantic + keyword search for accurate retrieval
-- **LLM Reranking** — Intelligent reranking with refusal logic for hallucination prevention
+- **Hybrid Search** — Combines semantic + keyword search for accurate retrieval (advanced mode)
+- **LLM Reranking** — Intelligent reranking with refusal logic (advanced mode)
 - **Beautiful UI** — Dark theme with drag-drop upload, processing progress, and library management
 - **100% Local** — All processing happens on your machine with Ollama
 
@@ -22,7 +23,7 @@ A local-first, privacy-focused chatbot that lets you have intelligent conversati
 ### Prerequisites
 
 1. **Python 3.11+**
-2. **Ollama** — [Install Ollama](https://ollama.com/download)
+2. **Ollama** - [Install Ollama](https://ollama.com/download)
 3. **Required models:**
    ```bash
    ollama pull llama3.1:8b
@@ -61,11 +62,11 @@ python -m src.main --mode web
 
 ### Web Interface
 
-1. **Open the Library** — Click the Library button in the header
-2. **Upload a Book** — Drag & drop or click to browse (supports .txt, .pdf, .epub)
-3. **Wait for Processing** — Watch the progress as chapters are parsed and indexed
-4. **Select Your Book** — Click on a book card to make it active
-5. **Start Chatting** — Ask questions about your novel!
+1. **Open the Library** - Click the Library button in the header
+2. **Upload a Book** - Drag & drop or click to browse (supports .txt, .pdf, .epub)
+3. **Wait for Processing** - Watch the progress as chapters are parsed and indexed
+4. **Select Your Book** - Click on a book card to make it active
+5. **Start Chatting** - Ask questions about your novel!
 
 ### CLI Mode
 
@@ -84,6 +85,20 @@ python -m src.main --mode cli
 
 Edit `config.yaml` to customize:
 
+### Pipeline Mode
+
+**Simple mode (recommended):** Fast, uses dense retrieval only
+```yaml
+pipeline_mode: "simple"
+```
+
+**Advanced mode:** Slower but thorough - includes query rewriting, hybrid retrieval, and LLM reranking
+```yaml
+pipeline_mode: "advanced"
+```
+
+### Model Settings
+
 ```yaml
 embedding:
   model: "qwen3-embedding:0.6b"
@@ -94,11 +109,11 @@ llm:
     model: "llama3.1:8b"
     temperature: 0.0
     max_tokens: 128
-  
+
   reranker:
     model: "llama3.1:8b"
     temperature: 0.0
-  
+
   generator:
     model: "llama3.1:8b"
     temperature: 0.25
@@ -176,6 +191,28 @@ ollama serve
 ### PDF/EPUB parsing issues
 - Ensure PyMuPDF and ebooklib are installed
 - Try converting to `.txt` for problematic files
+
+### Performance Issues / Too Many Refusals
+If the chatbot refuses to answer questions or seems worse than before:
+
+1. **Switch to Simple Mode** (recommended):
+   ```yaml
+   pipeline_mode: "simple"
+   ```
+   Simple mode skips query rewriting and LLM reranking, going straight from dense retrieval to generation. It's faster and often more reliable.
+
+2. **Check your Ollama models** are running:
+   ```bash
+   ollama list
+   ollama pull qwen3:8b
+   ollama pull qwen3-embedding:0.6b
+   ```
+
+3. **Lower the refusal threshold** in advanced mode:
+   ```yaml
+   retrieval:
+     min_rerank_score: 1.5  # Lower from 2.0 or 3.0
+   ```
 
 ## 📝 License
 
