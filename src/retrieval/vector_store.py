@@ -65,6 +65,7 @@ class VectorStore:
         documents = [c.content for c in chunks]
         metadatas = [
             {
+                "chunk_id": f"chunk_{c.chapter_number}_{c.chunk_index}",
                 "chapter_number": c.chapter_number,
                 "chapter_title": c.chapter_title,
                 "chunk_index": c.chunk_index,
