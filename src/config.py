@@ -57,11 +57,14 @@ class ChunkingConfig:
 @dataclass
 class RetrievalConfig:
     """Retrieval parameters."""
-    dense_top_k: int = 20
-    sparse_top_k: int = 20
-    fusion_top_k: int = 10
+    dense_top_k: int = 32
+    sparse_top_k: int = 32
+    fusion_top_k: int = 24
+    rerank_top_k: int = 10
     final_top_k: int = 5
     rrf_k: int = 60  # RRF constant
+    dense_weight: float = 1.0
+    sparse_weight: float = 1.15
     min_rerank_score: float = 3.0  # Refuse if top score below this
 
 
@@ -93,6 +96,7 @@ class Config:
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     paths: PathsConfig = field(default_factory=PathsConfig)
     ui: UIConfig = field(default_factory=UIConfig)
+    pipeline_mode: str = "advanced"
     
     @classmethod
     def from_yaml(cls, path: str) -> "Config":
@@ -145,6 +149,11 @@ class Config:
             for k, v in data['ui'].items():
                 if hasattr(config.ui, k):
                     setattr(config.ui, k, v)
+
+        if 'pipeline_mode' in data:
+            mode = str(data['pipeline_mode']).strip().lower()
+            if mode in {'simple', 'advanced'}:
+                config.pipeline_mode = mode
         
         return config
 

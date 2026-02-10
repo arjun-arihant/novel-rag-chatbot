@@ -37,11 +37,14 @@ chunking:
 
 # Retrieval parameters
 retrieval:
-  dense_top_k: 20
-  sparse_top_k: 20
-  fusion_top_k: 10
+  dense_top_k: 32
+  sparse_top_k: 32
+  fusion_top_k: 24
+  rerank_top_k: 10
   final_top_k: 5
   rrf_k: 60              # RRF constant
+  dense_weight: 1.0
+  sparse_weight: 1.15
   min_rerank_score: 2.0  # Refuse if top score below this (lowered for Qwen3)
 
 # Paths
@@ -56,3 +59,5 @@ ui:
   host: "127.0.0.1"
   port: 8000
   theme: "dark"
+# Pipeline mode
+pipeline_mode: "advanced"

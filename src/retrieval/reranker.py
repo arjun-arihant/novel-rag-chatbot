@@ -47,15 +47,18 @@ class LLMReranker:
         self,
         query: str,
         documents: List[FusedResult],
-        top_k: Optional[int] = None
+        top_k: Optional[int] = None,
+        candidate_k: Optional[int] = None
     ) -> List[RerankResult]:
         """
         Rerank documents using LLM scoring.
         """
         top_k = top_k or self.config.retrieval.final_top_k
+        candidate_k = candidate_k or self.config.retrieval.rerank_top_k
+        candidates = documents[:candidate_k]
         results = []
         
-        for doc in documents:
+        for doc in candidates:
             score, reason = self._score_document(query, doc.content)
             
             results.append(RerankResult(

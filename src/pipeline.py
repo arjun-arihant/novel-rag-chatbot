@@ -197,7 +197,12 @@ class RAGPipeline:
         
         # Step 3: Reranking
         start = time.time()
-        reranked_results = self.reranker.rerank(rewritten_query, hybrid_results)
+        reranked_results = self.reranker.rerank(
+            rewritten_query,
+            hybrid_results,
+            top_k=self.config.retrieval.final_top_k,
+            candidate_k=self.config.retrieval.rerank_top_k
+        )
         timing['rerank'] = time.time() - start
         
         # Step 4: Generation
@@ -229,7 +234,12 @@ class RAGPipeline:
         hybrid_results = self._active_retriever.retrieve(rewritten_query)
         
         # Rerank
-        reranked_results = self.reranker.rerank(rewritten_query, hybrid_results)
+        reranked_results = self.reranker.rerank(
+            rewritten_query,
+            hybrid_results,
+            top_k=self.config.retrieval.final_top_k,
+            candidate_k=self.config.retrieval.rerank_top_k
+        )
         
         # Stream generation
         for token in self.generator.generate_stream(rewritten_query, reranked_results):

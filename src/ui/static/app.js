@@ -5,6 +5,7 @@ class NovelRAG {
         this.activeNovel = null;
         this.novels = [];
         this.pendingFile = null;
+        this.queryInFlight = false;
 
         this.init();
     }
@@ -107,6 +108,13 @@ class NovelRAG {
             if (e.key === 'k' && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
                 this.toggleLibrary();
+            }
+
+            if (e.key === '/' && document.activeElement !== this.queryInput) {
+                e.preventDefault();
+                if (!this.queryInput.disabled) {
+                    this.queryInput.focus();
+                }
             }
         });
     }
@@ -385,7 +393,7 @@ class NovelRAG {
         e.preventDefault();
 
         const query = this.queryInput.value.trim();
-        if (!query || !this.activeNovel) return;
+        if (!query || !this.activeNovel || this.queryInFlight) return;
 
         // Add user message
         this.addMessage(query, 'user');
@@ -393,6 +401,7 @@ class NovelRAG {
         this.autoResizeTextarea();
 
         // Show loading
+        this.setQueryPending(true);
         const loadingEl = this.addLoading();
 
         try {
@@ -414,8 +423,10 @@ class NovelRAG {
             // Add response
             this.addMessage(result.answer, 'assistant', {
                 refused: result.refused,
+                refusalReason: result.refusal_reason,
                 chapters: result.chapters_cited,
-                sources: result.sources
+                sources: result.sources,
+                timing: result.timing
             });
 
             // Update sources panel
@@ -427,6 +438,8 @@ class NovelRAG {
             console.error('Query failed:', error);
             loadingEl.remove();
             this.addMessage('Sorry, something went wrong. Please try again.', 'assistant', { refused: true });
+        } finally {
+            this.setQueryPending(false);
         }
     }
 
@@ -447,6 +460,10 @@ class NovelRAG {
                 `;
             }
 
+            if (options.timing || options.refusalReason) {
+                html += `<div class="message-meta">${this.formatMeta(options)}</div>`;
+            }
+
             div.innerHTML = html;
 
             div.querySelector('.view-sources')?.addEventListener('click', () => {
@@ -460,6 +477,30 @@ class NovelRAG {
         this.messages.scrollTop = this.messages.scrollHeight;
 
         return div;
+    }
+
+
+    setQueryPending(pending) {
+        this.queryInFlight = pending;
+        this.queryInput.disabled = pending || !this.activeNovel;
+        this.submitBtn.disabled = pending || !this.activeNovel;
+    }
+
+    formatMeta(options) {
+        const parts = [];
+
+        if (options.timing) {
+            const totalMs = Object.values(options.timing).reduce((sum, sec) => sum + (sec * 1000), 0);
+            if (Number.isFinite(totalMs) && totalMs > 0) {
+                parts.push(`Latency: ${Math.round(totalMs)}ms`);
+            }
+        }
+
+        if (options.refused && options.refusalReason) {
+            parts.push(`Refusal: ${this.escapeHtml(options.refusalReason.replaceAll('_', ' '))}`);
+        }
+
+        return parts.join(' · ');
     }
 
     addLoading() {
